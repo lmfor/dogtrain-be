@@ -95,7 +95,12 @@ def view_public_profile(username:str, db: Session = Depends(get_db)):
     user = db.query(UserORM).filter_by(username=username).first()
     if not user:
         raise HTTPException(404, "User not found!")
-    return user
+    # DONT RETURN TOKEN
+    return {
+        "username":user.username,
+        "id":user.id
+    }
+
 
 # =======================================PROTECTED=======================================
 
