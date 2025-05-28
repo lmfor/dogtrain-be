@@ -1,24 +1,24 @@
 from pydantic import BaseModel, Field
 from typing import List
+from uuid import UUID
+
 
 # Response/Return models
+class UserIn(BaseModel):
+    username : str = Field(..., description="Desired Username")
 
-class TestCreateIn(BaseModel): # input class
-    description: str = Field(...)
-    tag: str = Field(...)
-
-class TestCreateOut(BaseModel): # output class
+class UserCreate(BaseModel):
     id: int = Field(...)
-    description: str = Field(...)
-    tag: str = Field(...)
-
-    class Config: # lets pydantic know that this model is compatible with ORM models --> JSON
-        orm_mode = True
-
-class TestReadOut(BaseModel): # output class for reading
-    id: int
-    description: str
-    tag: str
+    username: str = Field(...)
+    token: UUID
 
     class Config:
+        orm_mode = True
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    token: UUID
+
+    class Config: # JSON. which means we will return UserOUT
         orm_mode = True

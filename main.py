@@ -1,10 +1,11 @@
-from fastapi import FastAPI, Depends, Body, HTTPException
+from fastapi import FastAPI, Depends, Header, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from database import Base, engine, SessionLocal
 from sqlalchemy.orm import Session
-from schemas import TestCreateOut, TestCreateIn, TestReadOut
-from models import TestClass as TestORM
+from uuid import UUID as UUIDType
+from models import User as UserORM
+from schemas import *
 
 
 
@@ -28,7 +29,18 @@ def get_db():
         db.close()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan,
+              title="Dog Training API",
+              openapi_tags=[
+                      {
+                      "name":"Users",
+                      "description":"Create, read, and delete users."
+                      },
+                      {
+                      "name":"Dogs",
+                      "description":"Create, read, update, and delete dog profiles!" 
+                      }
+              ])
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,39 +51,45 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def get_root():
-    return {"RESPONSE": "200 OK"}
+# Tag the following methods with 'Users'
+user_router = APIRouter(prefix="/api/users", tags=["Users"])
 
-# Test call
-test = {"Test": "Response"}
-
-@app.post("/api/", response_model=TestCreateOut)
-def create_test(payload : TestCreateIn = Body(...), db: Session = Depends(get_db)):
+@user_router.post("/", response_model=UserCreate, status_code=201) # Created -> Code 201
+def create_user(payload: UserIn, db : Session=Depends(get_db)):
     
-    obj = TestORM(
-        description=payload.description,
-        tag=payload.tag
+    if db.query(UserORM).filter_by(username=payload.username).first():
+        raise HTTPException(409, "Username already taken!")
+    
+    user = UserORM(
+        username=payload.username
+        
     )
 
-    db.add(obj)
+    db.add(user)
     db.commit()
-    db.refresh(obj)
-    return obj
+    db.refresh(user)
+    return user
 
-@app.get("/api/{id}", response_model=TestReadOut)
-def read_test(id: int, db: Session = Depends(get_db)):
-    obj = db.query(TestORM).filter(TestORM.id == id).first()
-    if not obj:
-        raise HTTPException(status_code=404, detail="Error: Not found")
-    return obj
+@user_router.get("/{token}", response_model=UserOut)
+def get_user_info(token: UUIDType, db : Session=Depends(get_db)):
+    user = db.query(UserORM).filter_by(token=token).first()
+    if not user:
+        raise HTTPException(404, "User not found!")
+    return user
 
-@app.delete("/api/{id}", response_model=TestReadOut)
-def delete_test(id: int, db: Session = Depends(get_db)):
-    obj = db.query(TestORM).filter(TestORM.id == id).first()
-    if not obj:
-        raise HTTPException(status_code=404, detail="Error: Not found")
-    
-    db.delete(obj)
+# We don't want an update method. Usernames are final.
+
+@user_router.delete("/{token}", response_model=UserOut)
+def delete_user_info(token: UUIDType, db : Session=Depends(get_db)):
+    user = db.query(UserORM).filter_by(token=token).first()
+    if not user:
+        raise HTTPException(404, "User not found!")
+    db.delete(user)
     db.commit()
-    return obj
+    return user
+
+app.include_router(user_router)
+
+
+
+
