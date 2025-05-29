@@ -1,25 +1,20 @@
 from fastapi import FastAPI, Depends, Header, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from database import Base, engine, SessionLocal
 from sqlalchemy.orm import Session
 from uuid import UUID as UUIDType
-from models import User as UserORM
-from schemas import *
+from database import Base, engine, SessionLocal
+import models
+import schemas
 
-
-
-
-
-origins = [
-"http://localhost:8000"
-          ]
-
+# Allow localhost for local testing
+origins = ["http://localhost:8000"]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine) # create tables if they do not exist
-    yield # will pause here until the app is shutdown 
+    # Auto-create tables (switch to Alembic once you outgrow this)
+    Base.metadata.create_all(bind=engine)
+    yield
 
 def get_db():
     db = SessionLocal()
@@ -28,40 +23,30 @@ def get_db():
     finally:
         db.close()
 
-# 1) Reads the `Authorization: Bearer <token>` header
-# 2) Validates the token format
-# 3) Looks up the `User` by that token
-# 4) Raises a 401 if anything is wrong
 def get_current_user(
     authorization: str = Header(..., description="Bearer <token>"),
     db: Session = Depends(get_db)
-) -> UserORM:
+) -> models.User:
     scheme, _, token_str = authorization.partition(" ")
     if scheme.lower() != "bearer":
-        raise HTTPException(401, "Invalid auth scheme, use 'Bearer <token>'")
+        raise HTTPException(status_code=401, detail="Invalid auth scheme; use 'Bearer <token>'")
     try:
         token = UUIDType(token_str)
     except ValueError:
-        raise HTTPException(401, "Malformed token")
-    
-    user = db.query(UserORM).filter_by(token=token).first()
+        raise HTTPException(status_code=401, detail="Malformed token")
+    user = db.query(models.User).filter(models.User.token == token).first()
     if not user:
-        raise HTTPException(401, "Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
     return user
 
-
-app = FastAPI(lifespan=lifespan,
-              title="Dog Training API",
-              openapi_tags=[
-                      {
-                      "name":"Users",
-                      "description":"Create, read, and delete users."
-                      },
-                      {
-                      "name":"Dogs",
-                      "description":"Create, read, update, and delete dog profiles!" 
-                      }
-              ])
+app = FastAPI(
+    lifespan=lifespan,
+    title="API WIP",
+    openapi_tags=[
+        {"name": "Users", "description": "Sign up, log in, view & delete your account."},
+        {"name": "Dogs",  "description": "CRUD for dog profiles."}
+    ]
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,68 +56,127 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Tag the following methods with 'Users'
+# ──────── USERS ──────────────────────────────────────────────────────
 user_router = APIRouter(prefix="/api/users", tags=["Users"])
 
-# =======================================UNPROTECTED=======================================
-
-#SIGN-UP
-@user_router.post("/createaccount", response_model=UserCreate, status_code=201)
-def create_user(payload: UserIn, db: Session = Depends(get_db)):
-    if db.query(UserORM).filter_by(username=payload.username).first():
-        raise HTTPException(409, "Username already taken!")
-    
-    user = UserORM(username=payload.username)
-    db.add(user)
+@user_router.post(
+    "/createaccount",
+    response_model=schemas.UserOut,
+    status_code=201,
+    summary="Sign up with username + password"
+)
+def create_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
+    if db.query(models.User).filter(models.User.username == payload.username).first():
+        raise HTTPException(status_code=409, detail="Username already taken!")
+    new_user = models.User(
+        username=payload.username,
+        hashed_password=models.User.hash_password(payload.password),
+    )
+    db.add(new_user)
     db.commit()
-    db.refresh(user)
+    db.refresh(new_user)
+    return new_user
+
+@user_router.post(
+    "/login",
+    response_model=schemas.UserOut,
+    summary="Log in with username + password to retrieve your token"
+)
+def login_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == payload.username).first()
+    if not user or not user.verify_password(payload.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     return user
 
-#VIEW PROFILE
-@user_router.get("/profile/{username}")
-def view_public_profile(username:str, db: Session = Depends(get_db)):
-    user = db.query(UserORM).filter_by(username=username).first()
-    if not user:
-        raise HTTPException(404, "User not found!")
-    # DONT RETURN TOKEN
-    return {
-        "username":user.username,
-        "id":user.id
-    }
-
-
-# =======================================PROTECTED=======================================
-
-# LOGIN LOGIC
-@user_router.post("/login", response_model=UserCreate)
-def login_user(
-    payload: UserORM = Depends(get_current_user),
-    db: Session = Depends(get_db)):
-    user = db.query(UserORM).filter_by(username=payload.username).first()
-    if not user:
-        raise HTTPException(404, "User not found")
-    return user
-
-@user_router.get("/me", response_model=UserOut)
-def get_user_info(current_user: UserORM = Depends(get_current_user)):
+@user_router.get(
+    "/me",
+    response_model=schemas.UserOut,
+    summary="Get your own profile (requires Bearer token)"
+)
+def get_me(current_user: models.User = Depends(get_current_user)):
     return current_user
 
-# We don't want an update method. Usernames are final.
-
-@user_router.delete("/me", response_model=UserOut)
-def delete_user_info(
-    current_user: UserORM = Depends(get_current_user),
+@user_router.delete(
+    "/me",
+    response_model=schemas.UserOut,
+    summary="Delete your account (requires Bearer token)"
+)
+def delete_me(
+    current_user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     db.delete(current_user)
     db.commit()
     return current_user
 
+# Public profile (no token) — only username & id
+@user_router.get(
+    "/profile/{username}",
+    summary="View someone’s public profile"
+)
+def view_public_profile(username: str, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found!")
+    return {"id": user.id, "username": user.username}
+
 app.include_router(user_router)
 
-# Dog Router
+
+# ──────── DOGS ────────────────────────────────────────────────────────
 dog_router = APIRouter(prefix="/api/dogs", tags=["Dogs"])
 
+@dog_router.post(
+    "/",
+    response_model=schemas.DogOut,
+    summary="Create a new dog profile"
+)
+def create_dog(dog_in: schemas.DogCreate, db: Session = Depends(get_db)):
+    owner = db.query(models.User).filter(models.User.id == dog_in.owner_id).first()
+    if not owner:
+        raise HTTPException(status_code=404, detail="Owner not found!")
+    dog = models.Dog(**dog_in.model_dump())
+    db.add(dog)
+    db.commit()
+    db.refresh(dog)
+    return dog
 
+@dog_router.get(
+    "/{dog_id}",
+    response_model=schemas.DogOut,
+    summary="Fetch a single dog by ID"
+)
+def get_dog(dog_id: str, db: Session = Depends(get_db)):
+    dog = db.query(models.Dog).filter(models.Dog.id == dog_id).first()
+    if not dog:
+        raise HTTPException(status_code=404, detail="Dog not found")
+    return dog
 
+@dog_router.patch(
+    "/{dog_id}",
+    response_model=schemas.DogOut,
+    summary="Update fields of a dog profile"
+)
+def update_dog(dog_id: str, dog_up: schemas.DogUpdate, db: Session = Depends(get_db)):
+    dog = db.query(models.Dog).filter(models.Dog.id == dog_id).first()
+    if not dog:
+        raise HTTPException(status_code=404, detail="Dog not found")
+    for field, val in dog_up.model_dump(exclude_unset=True).items():
+        setattr(dog, field, val)
+    db.commit()
+    db.refresh(dog)
+    return dog
+
+@dog_router.delete(
+    "/{dog_id}",
+    status_code=204,
+    summary="Delete a dog profile"
+)
+def delete_dog(dog_id: str, db: Session = Depends(get_db)):
+    dog = db.query(models.Dog).filter(models.Dog.id == dog_id).first()
+    if not dog:
+        raise HTTPException(status_code=404, detail="Dog not found")
+    db.delete(dog)
+    db.commit()
+
+app.include_router(dog_router)
