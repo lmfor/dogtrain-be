@@ -15,7 +15,7 @@ class UserOut(UserBase):
     token: UUID
 
     class Config: # JSON. which means we will return UserOUT
-        orm_mode = True
+        from_attributes = True
 
     # ==== DOG SCHEMAS ====
 
@@ -28,13 +28,13 @@ class DogCreate(DogBase):
     owner_id: UUID
 
 class DogUpdate(BaseModel):
-    name: Optional[str]
-    breed: Optional[str]
-    age: Optional[str]
+    name: Optional[str] = None
+    breed: Optional[str] = None
+    age: Optional[str] = None
 
 class DogOut(DogBase):
     id: UUID
     owner_id: UUID
 
     class Config:
-        orm_mode = True
+        from_attributes = True

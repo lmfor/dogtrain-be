@@ -15,6 +15,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     token = Column(UUID(as_uuid=True), unique=True, default=uuid.uuid4, index=True)
+    #test_column = Column(String, nullable=True)
 
     dogs = relationship("Dog", back_populates="owner")
 

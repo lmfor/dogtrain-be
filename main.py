@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from sqlalchemy.orm import Session
 from uuid import UUID as UUIDType
+from alembic import command
+from alembic.config import Config
 from database import Base, engine, SessionLocal
 import models
 import schemas
@@ -10,9 +12,14 @@ import schemas
 # Allow localhost for local testing
 origins = ["http://localhost:8000"]
 
+# Point alembic at my config file
+##alembic_cfg = Config("alembic.ini")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Auto-create tables (switch to Alembic once you outgrow this)
+    # migrating any tables to latest revision
+    #command.upgrade(alembic_cfg, "head")
+    # ensure tables exist for any models without migrations
     Base.metadata.create_all(bind=engine)
     yield
 
@@ -56,7 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ──────── USERS ──────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────── USERS ──────────────────────────────────────────────────────
 user_router = APIRouter(prefix="/api/users", tags=["Users"])
 
 @user_router.post(
@@ -123,7 +130,7 @@ def view_public_profile(username: str, db: Session = Depends(get_db)):
 app.include_router(user_router)
 
 
-# ──────── DOGS ────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────── DOGS ────────────────────────────────────────────────────────
 dog_router = APIRouter(prefix="/api/dogs", tags=["Dogs"])
 
 @dog_router.post(
@@ -161,8 +168,9 @@ def update_dog(dog_id: str, dog_up: schemas.DogUpdate, db: Session = Depends(get
     dog = db.query(models.Dog).filter(models.Dog.id == dog_id).first()
     if not dog:
         raise HTTPException(status_code=404, detail="Dog not found")
-    for field, val in dog_up.model_dump(exclude_unset=True).items():
-        setattr(dog, field, val)
+    for field, val in dog_up.model_dump(exclude_unset=True, exclude_none=True).items():
+        if val is not None:
+            setattr(dog, field, val)
     db.commit()
     db.refresh(dog)
     return dog
