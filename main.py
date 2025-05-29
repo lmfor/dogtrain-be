@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI, Depends, Header, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -13,14 +14,18 @@ import schemas
 origins = ["http://localhost:8000"]
 
 # Point alembic at my config file
-##alembic_cfg = Config("alembic.ini")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # migrating any tables to latest revision
-    #command.upgrade(alembic_cfg, "head")
+    def run_migrations():
+        cfg = Config("alembic.ini")
+        command.upgrade(cfg, "head")
+    
+    await asyncio.to_thread(run_migrations)
     # ensure tables exist for any models without migrations
-    Base.metadata.create_all(bind=engine)
+    # Base.metadata.create_all(bind=engine)
     yield
 
 def get_db():
